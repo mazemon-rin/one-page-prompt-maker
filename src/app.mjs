@@ -30,6 +30,7 @@ function render(){
   $('#app').innerHTML='<main class="shell"><header class="topbar"><a class="brand" href="./"><span class="logo">1</span><span><b>1枚資料プロンプトメーカー</b><small>Ver.0.1 / Local First</small></span></a><button id="home" class="link-button">最初に戻る</button></header><nav class="progress" aria-label="作成STEP">'+nav+'</nav><header class="heading"><p class="eyebrow">STEP '+(state.step+1)+' / '+steps.length+'</p><h1>'+title+'</h1><p>画像を見て、近いものを選ぶだけで大丈夫です。</p></header><section id="screen">'+body+'</section><nav class="nav">'+(state.step>0&&state.step<8?'<button id="back">← 戻る</button>':'')+(state.step<8?'<button class="primary" id="next">'+(state.step===7?'指示文を作る':'次へ →')+'</button>':'')+'</nav></main>';bind();
 }
 function bind(){
+  if(state.step===8){const guide=document.createElement('p');guide.className='ai-note';guide.textContent=state.model.adapter==='gemini'?'Geminiでは左メニューの「画像」を開き、この指示文と必要な画像を貼り付けてください。':state.model.adapter==='chatgpt'?'ChatGPTへこの指示文をコピーして使ってください。':'選んだAIへこの指示文をコピーして使ってください。';if(state.model.characterMode==='sheet')guide.textContent+=' キャラクターシートも一緒に添付してください。';document.querySelector('.result-card')?.prepend(guide);}
   $('#home')?.addEventListener('click',()=>{state.step=0;render();});
   document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{const target=Number(b.dataset.step);if(canVisit(target)){state.step=target;if(target===8)state.result=buildPrompt(state.model);render();}}));
   $('#back')?.addEventListener('click',()=>{state.step--;render();});

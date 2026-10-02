@@ -13,7 +13,7 @@ test('character sheet guidance is included only when selected', () => {
   const prompt = buildPrompt(createPromptModel({ topic: '案内資料', usage: 'guide', layout: 'flow', design: 'friendly', density: 'balanced', characterMode: 'sheet', adapter: 'gemini' }));
   assert.match(prompt, /キャラクターシート/);
   assert.match(prompt, /添付してください/);
-  assert.match(prompt, /キャラクターシートの説明文を資料内に記載しない/);
+  assert.match(prompt, /キャラクターシートに書かれた説明文や設定資料そのものを完成資料へ転載しない/);
 });
 
 test('optional additions are passed through without invented details', () => {
