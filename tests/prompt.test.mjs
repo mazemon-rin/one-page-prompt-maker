@@ -19,17 +19,45 @@ test('character sheet guidance is included only when selected', () => {
 test('Gemini uses a two-stage prompt flow', () => {
   const prompt = buildPrompt(createPromptModel({ topic: '案内資料', usage: 'guide', layout: 'flow', design: 'friendly', density: 'balanced', adapter: 'gemini' }));
   assert.match(prompt, /この段階では画像を生成しないでください/);
-  assert.match(prompt, /Geminiの「画像」に貼り付ける画像生成用プロンプト/);
+  assert.match(prompt, /Geminiの「画像」機能へコピーして使用するための完成した画像生成用プロンプト/);
   assert.match(prompt, /一度に1問だけ/);
-  assert.match(prompt, /了承したら、最終的な画像生成用プロンプトだけを出力/);
+  assert.match(prompt, /了承したら、画像生成用プロンプトのテキストを出力し、通常チャット側の処理を終了/);
   assert.doesNotMatch(prompt, /不足情報を質問したり、ユーザーの了承を待ったりせず/);
   assert.doesNotMatch(prompt, /そのまま画像生成してください/);
+  assert.match(prompt, /この通常チャットでは画像を生成しないでください/);
+  assert.match(prompt, /画像生成ツールを使用せず/);
+  assert.match(prompt, /別画面のGemini「画像」へコピーして使う画像生成用プロンプトをテキストで作成しますか/);
+  assert.match(prompt, /【Gemini「画像」用プロンプト】/);
 });
 
 test('generic prompt does not contain Gemini-specific flow', () => {
   const prompt = buildPrompt(createPromptModel({ topic: '案内資料', usage: 'guide', layout: 'flow', design: 'friendly', density: 'balanced', adapter: 'generic' }));
   assert.doesNotMatch(prompt, /Gemini/);
   assert.doesNotMatch(prompt, /この段階では画像を生成しない/);
+});
+
+test('flow layout keeps step count flexible for ChatGPT and Gemini', () => {
+  for (const adapter of ['chatgpt', 'gemini']) {
+    const prompt = buildPrompt(createPromptModel({ topic: '予約方法', usage: 'guide', layout: 'flow', design: 'friendly', density: 'balanced', adapter }));
+    assert.match(prompt, /順番で見せる.*ステップ数を意味しません/);
+    assert.match(prompt, /必ず3ステップ、4ステップ、5ステップなどに固定しない/);
+    assert.match(prompt, /内容に合わせて流れを提案してほしい/);
+    assert.match(prompt, /未入力の数字、制度、条件、料金、URLなどは追加しない/);
+  }
+});
+
+test('explicit step count takes priority while unspecified count stays flexible', () => {
+  const prompt = buildPrompt(createPromptModel({ topic: '操作手順', usage: 'guide', layout: 'flow', design: 'simple', density: 'balanced', mustInclude: '6ステップで説明', adapter: 'gemini' }));
+  assert.match(prompt, /ユーザーが手順数を明示した場合は、その指定をそのまま優先/);
+  assert.match(prompt, /6ステップで説明/);
+  assert.match(prompt, /指定していない場合のみ.*固定しない/);
+});
+
+test('flow-specific question rules are omitted for other layouts and generic AI', () => {
+  const gridChatgpt = buildPrompt(createPromptModel({ topic: '一覧', usage: 'guide', layout: 'grid', design: 'simple', density: 'light', adapter: 'chatgpt' }));
+  const flowGeneric = buildPrompt(createPromptModel({ topic: '流れ', usage: 'guide', layout: 'flow', design: 'simple', density: 'light', adapter: 'generic' }));
+  assert.doesNotMatch(gridChatgpt, /「順番で見せる」は情報を順番/);
+  assert.doesNotMatch(flowGeneric, /内容に合わせて流れを提案してほしい/);
 });
 
 test('optional additions are passed through without invented details', () => {
