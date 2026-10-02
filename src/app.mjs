@@ -1,0 +1,46 @@
+import { createPromptModel, buildPrompt, labels } from './prompt-builder.mjs';
+import { load, save, exportData, importData } from './storage.mjs';
+
+const choices = {
+  usage: [['sns','SNS図解','SNSで分かりやすく伝える'],['product','商品・サービス紹介','特徴やメリットを1枚で紹介'],['proposal','1枚提案書','困りごとと解決方法を整理'],['sales','営業資料','お客様への説明に使う'],['compare','比較資料','候補を分かりやすく比べる'],['guide','初心者向け解説','難しい内容をやさしく説明']],
+  layout: [['grid','一覧で見せる','ポイントをカードで整理'],['flow','順番で見せる','手順や流れを説明'],['relation','関係を見せる','中心と周りの関係を図解'],['compare','比べて見せる','候補を同じ基準で比較'],['problem','困りごとから提案','解決方法まで伝える']],
+  design: [['simple','すっきり・読みやすい','余白を活かした印象'],['friendly','やさしく親しみやすい','初心者にも伝わる印象'],['energetic','明るく元気','目を引く前向きな印象'],['professional','信頼感のある','仕事向けの落ち着いた印象'],['handdrawn','手描き風であたたかい','人の温度が伝わる印象']],
+  density: [['light','少なめ','余白を広くする'],['balanced','バランス','大切な情報を整理'],['rich','しっかり','情報を多めに載せる']]
+};
+const steps=[['usage','テーマと用途'],['layout','資料の構成'],['design','資料のデザイン'],['density','情報量'],['details','追加したい内容はありますか？'],['character','人物・キャラクター'],['confirm','内容を確認しましょう'],['adapter','どの画像生成AIで使いますか？'],['result','指示文が完成しました']];
+const stepNames=['テーマ・用途','構成','デザイン','情報量','追加内容','人物','確認','AI','完成'];
+const state={model:createPromptModel(),step:0,maxStep:0,result:'',history:[],projects:[]};
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function persist(){save({draft:state.model,history:state.history,projects:state.projects,maxStep:state.maxStep});}
+function validThrough(target){const m=state.model;const required=[Boolean(m.topic.trim()&&m.usage),Boolean(m.layout),Boolean(m.design),Boolean(m.density),true,Boolean(m.characterMode),true,Boolean(m.adapter),true];return required.slice(0,target+1).every(Boolean);}
+function canVisit(target){return target<=state.maxStep&&validThrough(target);}
+function markReached(){state.maxStep=Math.max(state.maxStep,state.step);persist();}
+function cards(key){return '<div class="cards">'+choices[key].map(([id,t,d],i)=>'<button class="choice-card '+(state.model[key]===id?'selected':'')+'" data-choice="'+id+'"><img class="choice-image" src="./images/steps/step'+({usage:1,layout:2,design:3,density:4}[key])+'-'+(i+1)+'.png" alt="'+t+'の資料イメージ"><strong>'+t+'</strong><small>'+d+'</small></button>').join('')+'</div>';}
+function render(){
+  const [key,title]=steps[state.step]; let body='';
+  if(choices[key]) body=cards(key);
+  if(key==='usage') body='<div class="topic-first"><label>何についての資料を作りますか？<textarea id="topic" placeholder="例：楽天ROOMの始め方、新しいサービスの紹介">'+esc(state.model.topic)+'</textarea></label><p>テーマを入力したら、近い資料のイメージを選んでください。</p></div>'+cards(key);
+  if(key==='details') body='<div class="optional-note"><strong>特になければ、そのまま次へ進めます。</strong><p>詳しい内容はAIが必要に応じて質問します。</p></div><div class="form-card"><label>必ず入れたい内容（任意）<textarea id="mustInclude" placeholder="例：数字、料金、注意事項、URL、キャンペーン情報">'+esc(state.model.mustInclude)+'</textarea></label><label>その他伝えておきたいこと（任意）<textarea id="other" placeholder="特になければ空欄のままで大丈夫です">'+esc(state.model.other)+'</textarea></label></div>';
+  if(key==='character'){const modes=[['none','人物を使わない','図や文字を中心にする'],['person','人物を使う','説明する人物を配置する'],['same','同じキャラクターを使う','人物の印象をできるだけそろえる'],['sheet','キャラクターシートを使う','基準画像をAIへ一緒に添付する']];body='<div class="choice-row character-choices">'+modes.map(([id,t,d])=>'<button class="choice-card '+(state.model.characterMode===id?'selected':'')+'" data-character-mode="'+id+'"><strong>'+t+'</strong><small>'+d+'</small></button>').join('')+'</div>'+(state.model.characterMode==='sheet'?'<div class="attachment-note"><strong>キャラクターシートをAIに添付してください。</strong><p>資料を作成するときに、キャラクターシート（基準画像）をChatGPT / Geminiへ一緒に添付します。</p><p>このアプリに画像を登録する必要はありません。</p></div>':'')+(state.model.characterMode==='person'||state.model.characterMode==='same'?'<label class="form-card">人物の希望（任意）<textarea id="character" placeholder="例：親しみやすい女性">'+esc(state.model.character)+'</textarea></label>':'');}
+  if(key==='confirm') body='<div class="summary"><p><b>用途</b>'+labels.usage[state.model.usage]+'</p><p><b>見せ方</b>'+labels.layout[state.model.layout]+'</p><p><b>雰囲気</b>'+labels.design[state.model.design]+'</p><p><b>情報量</b>'+labels.density[state.model.density]+'</p><p><b>テーマ</b>'+esc(state.model.topic)+'</p><p><b>追加内容</b>'+esc(state.model.mustInclude||state.model.other||'なし')+'</p><p><b>人物</b>'+({none:'使わない',person:'人物を使う',same:'同じキャラクターを使う',sheet:'キャラクターシートをAIに添付'}[state.model.characterMode]||'未選択')+'</p></div>';
+  if(key==='adapter') body='<p class="ai-note">作成した指示文を、選んだAIへコピーして使います。</p><div class="choice-row"><button class="choice-card '+(state.model.adapter==='generic'?'selected':'')+'" data-adapter="generic"><strong>その他のAI</strong><small>汎用プロンプト</small></button><button class="choice-card '+(state.model.adapter==='chatgpt'?'selected':'')+'" data-adapter="chatgpt"><strong>ChatGPT</strong><small>ChatGPTの画像生成向け</small></button><button class="choice-card '+(state.model.adapter==='gemini'?'selected':'')+'" data-adapter="gemini"><strong>Gemini</strong><small>Geminiの画像生成向け</small></button></div>';
+  if(key==='result') body='<div class="result-card"><textarea id="result" readonly>'+esc(state.result)+'</textarea><div class="actions"><button class="primary" id="copy">文章をコピー</button><button id="saveProject">保存する</button><button id="export">JSONを書き出す</button><label class="button-like">JSONを読み込む<input id="import" type="file" accept="application/json"></label></div><p id="status"></p></div><section class="history"><h2>保存済みプロジェクト・履歴</h2>'+(state.history.length?state.history.map(x=>'<article><time>'+new Date(x.createdAt).toLocaleString('ja-JP')+'</time><p>'+esc(x.topic||'1枚資料')+'</p></article>').join(''):'<p>まだ保存されていません。</p>')+'</section>';
+  const nav=steps.map((s,i)=>'<button class="step-nav '+(i<state.step?'done ':'')+(i===state.step?'current ':'')+(canVisit(i)?'reachable':'')+'" data-step="'+i+'" '+(canVisit(i)?'':'disabled')+'><span>'+(i+1)+'</span>'+stepNames[i]+'</button>').join('');
+  $('#app').innerHTML='<main class="shell"><header class="topbar"><a class="brand" href="./"><span class="logo">1</span><span><b>1枚資料プロンプトメーカー</b><small>Ver.0.1 / Local First</small></span></a><button id="home" class="link-button">最初に戻る</button></header><nav class="progress" aria-label="作成STEP">'+nav+'</nav><header class="heading"><p class="eyebrow">STEP '+(state.step+1)+' / '+steps.length+'</p><h1>'+title+'</h1><p>画像を見て、近いものを選ぶだけで大丈夫です。</p></header><section id="screen">'+body+'</section><nav class="nav">'+(state.step>0&&state.step<8?'<button id="back">← 戻る</button>':'')+(state.step<8?'<button class="primary" id="next">'+(state.step===7?'指示文を作る':'次へ →')+'</button>':'')+'</nav></main>';bind();
+}
+function bind(){
+  $('#home')?.addEventListener('click',()=>{state.step=0;render();});
+  document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{const target=Number(b.dataset.step);if(canVisit(target)){state.step=target;if(target===8)state.result=buildPrompt(state.model);render();}}));
+  $('#back')?.addEventListener('click',()=>{state.step--;render();});
+  $('#next')?.addEventListener('click',()=>{if(state.step===0&&!state.model.topic.trim())return alert('テーマを入力してください。');if(state.step===7){state.result=buildPrompt(state.model);state.step=8;markReached();}else{state.step++;markReached();}render();});
+  document.querySelectorAll('[data-choice]').forEach(b=>b.addEventListener('click',()=>{state.model[steps[state.step][0]]=b.dataset.choice;persist();render();}));
+  document.querySelectorAll('[data-character-mode]').forEach(b=>b.addEventListener('click',()=>{state.model.characterMode=b.dataset.characterMode;state.model.characterEnabled=state.model.characterMode!=='none';persist();render();}));
+  document.querySelectorAll('[data-adapter]').forEach(b=>b.addEventListener('click',()=>{state.model.adapter=b.dataset.adapter;state.result=buildPrompt(state.model);persist();render();}));
+  ['topic','mustInclude','other','character'].forEach(id=>$('#'+id)?.addEventListener('input',e=>{state.model[id]=e.target.value;persist();}));
+  $('#copy')?.addEventListener('click',async()=>{await navigator.clipboard?.writeText(state.result);$('#status').textContent='コピーしました。ChatGPTまたはGeminiに貼り付けてください。';});
+  $('#saveProject')?.addEventListener('click',()=>{const x={id:crypto.randomUUID(),createdAt:new Date().toISOString(),topic:state.model.topic,prompt:state.result};state.history.unshift(x);state.projects.unshift({...x,model:state.model});persist();render();});
+  $('#export')?.addEventListener('click',()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(exportData(),null,2)],{type:'application/json'}));a.download='one-page-prompt-maker-backup.json';a.click();});
+  $('#import')?.addEventListener('change',async e=>{try{importData(JSON.parse(await e.target.files[0].text()));Object.assign(state,load());state.model=createPromptModel(state.draft||{});alert('復元しました。');render();}catch(err){alert(err.message);}});
+}
+Object.assign(state,load());state.model=createPromptModel(state.draft||{});state.maxStep=Math.min(Number(state.maxStep)||0,8);render();
