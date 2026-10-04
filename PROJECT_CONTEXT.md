@@ -2,7 +2,8 @@
 
 ## 現在地
 
-- アプリ名：1枚資料プロンプトメーカー Ver.0.1
+- アプリ名：まとめるAI：MATOME・AI（まとめあい） Ver.1
+- 英語サブタイトル：AI Visual Document Studio
 - AI初心者向けの静的Webアプリ
 - テーマ、用途、構成、デザイン、情報量、追加内容、人物設定、AIをSTEP式で選択
 - ChatGPT / Gemini / その他のAI向け指示文を生成
@@ -13,9 +14,11 @@
 
 ## 公開前状態
 
-- GitHub Pages等の公開方式は公開作業時に確認
-- Commit / Push / Deployは未実施（公開作業で実行）
-- `image-prompt-maker-v2`とは独立し、元アプリは変更しない
+- GitHub Pagesで公開中。現時点ではnoindex / robots.txtの検索抑制を維持
+- GitHubリポジトリはPrivate運用予定。公開設定は勝手に変更しない
+- 旧アプリとは独立したMATOME・AI専用プロジェクトで、外部アプリは変更しない
+- note URLは未確定。`src/app.mjs`のNOTE_URLへ設定する
+- Ver.2以降のAI調査、ログイン、クラウド保存、LINE通知は未実装
 
 ## 起動
 
