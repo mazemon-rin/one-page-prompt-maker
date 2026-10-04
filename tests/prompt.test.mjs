@@ -65,3 +65,21 @@ test('optional additions are passed through without invented details', () => {
   assert.match(prompt, /料金は月額500円/);
   assert.doesNotMatch(prompt, /効率よく予約/);
 });
+
+test('information density controls block explanation detail without inventing facts', () => {
+  const cases = [
+    ['light', /見出し＋一言程度/, /余白を重視/],
+    ['balanced', /見出し＋1〜2文程度/, /初心者がその項目で何をするのか理解/],
+    ['rich', /より具体的な説明＋必要なポイント/, /どのように進めるのかが分かる程度/]
+  ];
+  for (const [density, detailPattern, explanationPattern] of cases) {
+    for (const adapter of ['chatgpt', 'gemini', 'generic']) {
+      const prompt = buildPrompt(createPromptModel({ topic: 'YouTubeの始め方', usage: 'guide', layout: 'flow', design: 'friendly', density, adapter }));
+      assert.match(prompt, detailPattern);
+      assert.match(prompt, explanationPattern);
+      assert.match(prompt, /各ブロックの見出しは、そのブロックで実際に説明する操作・内容と一致/);
+      assert.match(prompt, /ユーザーが入力・選択していない数字、料金、制度、条件、URL/);
+      assert.doesNotMatch(prompt, /YouTube登録者1万人|毎日投稿|月額500円|20%OFF/);
+    }
+  }
+});
