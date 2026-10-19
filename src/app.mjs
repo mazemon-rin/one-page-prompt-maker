@@ -1,6 +1,13 @@
 import { createPromptModel, buildPrompt, labels } from './prompt-builder.mjs';
 import { load, save, exportData, importData } from './storage.mjs';
 import { clearStepModel, restoreProjectModel, snapshotProjectModel } from './project-state.mjs';
+import {
+  applyAnalyticsConsent,
+  createAnalyticsFlowTracker,
+  initializeAnalytics,
+  readAnalyticsConsent,
+  trackAnalyticsEvent
+} from './analytics.mjs';
 
 const choices = {
   usage: [['sns','SNS図解','SNSで分かりやすく伝える'],['product','商品・サービス紹介','特徴やメリットを1枚で紹介'],['proposal','1枚提案書','困りごとと解決方法を整理'],['sales','営業資料','お客様への説明に使う'],['compare','比較資料','候補を分かりやすく比べる'],['guide','初心者向け解説','難しい内容をやさしく説明']],
@@ -10,7 +17,9 @@ const choices = {
 };
 const steps=[['usage','テーマと用途'],['layout','資料の構成'],['design','資料のデザイン'],['density','情報量'],['details','追加したい内容はありますか？'],['character','人物・キャラクター'],['confirm','内容を確認しましょう'],['adapter','どのAIで画像生成しますか？'],['result','指示文が完成しました']];
 const stepNames=['テーマ・用途','構成','デザイン','情報量','追加内容','人物','確認','AI','完成'];
-const state={model:createPromptModel(),step:0,maxStep:0,result:'',history:[],projects:[]};
+const state={model:createPromptModel(),step:0,maxStep:0,result:'',history:[],projects:[],analyticsConsent:readAnalyticsConsent(),analyticsSettingsOpen:false,analyticsMessage:''};
+const analyticsFlow=createAnalyticsFlowTracker();
+state.analyticsSettingsOpen=globalThis.location?.hash==='#analytics-settings';
 // note URL確定後は、この値だけを差し替えます。未確定のURLは設定しません。
 const NOTE_URL='';
 const $=s=>document.querySelector(s);
@@ -19,6 +28,10 @@ function persist(){save({draft:state.model,history:state.history,projects:state.
 function validThrough(target){const m=state.model;const required=[Boolean(m.topic.trim()&&m.usage),Boolean(m.layout),Boolean(m.design),Boolean(m.density),true,Boolean(m.characterMode),true,Boolean(m.adapter),true];return required.slice(0,target+1).every(Boolean);}
 function canVisit(target){return target<=state.maxStep&&validThrough(target);}
 function markReached(){state.maxStep=Math.max(state.maxStep,state.step);persist();}
+function analyticsPanel(){
+  if(state.analyticsConsent&& !state.analyticsSettingsOpen)return '';
+  return '<aside class="analytics-consent" id="analytics-settings" aria-labelledby="analytics-title"><div><strong id="analytics-title">アクセス解析へのご協力</strong><p>利用状況の集計にGoogle Analytics 4を使います。入力内容や生成プロンプトは送信しません。詳しくは<a href="./terms.html#analytics">利用規約</a>をご確認ください。解析に同意しなくても、すべての機能を利用できます。</p></div><div class="analytics-actions"><button class="primary" data-analytics-consent="granted">同意する</button><button data-analytics-consent="denied">同意しない</button>'+(state.analyticsConsent?'<button class="subtle-button" id="closeAnalyticsSettings">閉じる</button>':'')+'</div>'+(state.analyticsMessage?'<p class="analytics-status" role="status">'+esc(state.analyticsMessage)+'</p>':'')+'</aside>';
+}
 function cards(key){return '<div class="cards">'+choices[key].map(([id,t,d],i)=>'<button class="choice-card '+(state.model[key]===id?'selected':'')+'" data-choice="'+id+'"><img class="choice-image" src="./images/steps/step'+({usage:1,layout:2,design:3,density:4}[key])+'-'+(i+1)+'.png" alt="'+t+'の資料イメージ"><strong>'+t+'</strong><small>'+d+'</small></button>').join('')+'</div>';}
 function render(){
   const [key,title]=steps[state.step]; let body='';
@@ -33,23 +46,26 @@ function render(){
   const noteLink=NOTE_URL?'<a class="note-link" href="'+NOTE_URL+'" target="_blank" rel="noreferrer">作例・使い方・今後のアップデートを見る</a>':'<button class="note-link" type="button" disabled>作例・使い方・今後のアップデートを見る</button>';
   const headingHint=['usage','layout','design','density'].includes(key)?'<p>画像を見て、近いものを選ぶだけで大丈夫です。</p>':'';
   const clearable=['usage','layout','design','density','details','character','adapter'].includes(key);
-  $('#app').innerHTML='<main class="shell"><header class="topbar"><a class="brand" href="./"><span class="logo">M</span><span><b>まとめるAI：MATOME・AI（まとめあい）</b><small>AI Visual Document Studio / Ver.1.1</small></span></a><button id="home" class="link-button">最初に戻る</button></header><p class="tagline">AIでまとめて、伝わる1枚を。</p><nav class="progress" aria-label="作成STEP">'+nav+'</nav><header class="heading"><p class="eyebrow">STEP '+(state.step+1)+' / '+steps.length+'</p><h1>'+title+'</h1>'+headingHint+'</header><section id="screen">'+body+'</section><nav class="nav">'+(state.step>0&&state.step<8?'<button id="back">← 戻る</button>':'')+(clearable?'<button id="clearStep" class="subtle-button">このSTEPをクリア</button>':'')+(state.step<8?'<button class="primary" id="next">'+(state.step===7?'指示文を作る':'次へ →')+'</button>':'')+'</nav><aside class="release-notes"><p>AIが生成した内容は必ずしも正確とは限りません。公開・配布前に内容をご確認ください。</p><p>MATOME・AIは今後も機能追加を予定しています。</p>'+noteLink+'</aside><footer class="site-footer"><a href="./terms.html">利用規約</a><span>© 2026 mazemon-rin. 無断転載・複製・改変・再配布を禁じます。</span></footer></main>';bind();
+  $('#app').innerHTML='<main class="shell"><header class="topbar"><a class="brand" href="./"><span class="logo">M</span><span><b>まとめるAI：MATOME・AI（まとめあい）</b><small>AI Visual Document Studio / Ver.1.1</small></span></a><button id="home" class="link-button">最初に戻る</button></header><p class="tagline">AIでまとめて、伝わる1枚を。</p>'+analyticsPanel()+'<nav class="progress" aria-label="作成STEP">'+nav+'</nav><header class="heading"><p class="eyebrow">STEP '+(state.step+1)+' / '+steps.length+'</p><h1>'+title+'</h1>'+headingHint+'</header><section id="screen">'+body+'</section><nav class="nav">'+(state.step>0&&state.step<8?'<button id="back">← 戻る</button>':'')+(clearable?'<button id="clearStep" class="subtle-button">このSTEPをクリア</button>':'')+(state.step<8?'<button class="primary" id="next">'+(state.step===7?'指示文を作る':'次へ →')+'</button>':'')+'</nav><aside class="release-notes"><p>AIが生成した内容は必ずしも正確とは限りません。公開・配布前に内容をご確認ください。</p><p>MATOME・AIは今後も機能追加を予定しています。</p>'+noteLink+'</aside><footer class="site-footer"><a href="./terms.html">利用規約</a><a href="#analytics-settings" id="analytics-settings-link">アクセス解析の設定</a><span>© 2026 mazemon-rin. 無断転載・複製・改変・再配布を禁じます。</span></footer></main>';bind();
 }
 function bind(){
   if(state.step===8){const guide=document.createElement('div');guide.className='ai-note';if(state.model.adapter==='gemini'){guide.innerHTML='<strong>Geminiでの使い方</strong><ol><li>この指示文をGeminiの通常チャットに貼る</li><li>Geminiからの質問に答える</li><li>作られた画像生成用プロンプトをコピーする</li><li>Geminiの「画像」を開いて貼り付ける</li><li>画像を生成する</li>'+(state.model.characterMode==='sheet'?'<li>キャラクターシートも一緒に添付する</li>':'')+'</ol>';}else{guide.textContent=state.model.adapter==='chatgpt'?'ChatGPTへこの指示文をコピーして使ってください。':'選んだAIへこの指示文をコピーして使ってください。';if(state.model.characterMode==='sheet')guide.textContent+=' キャラクターシートも一緒に添付してください。';}document.querySelector('.result-card')?.prepend(guide);}
-  $('#home')?.addEventListener('click',()=>{state.step=0;render();});
-  document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{const target=Number(b.dataset.step);if(canVisit(target)){state.step=target;if(target===8)state.result=buildPrompt(state.model);render();}}));
+  $('#home')?.addEventListener('click',()=>{analyticsFlow.reset();state.step=0;render();});
+  document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{const target=Number(b.dataset.step);if(canVisit(target)){state.step=target;if(target===8){state.result=buildPrompt(state.model);analyticsFlow.promptGenerated();}render();}}));
   $('#back')?.addEventListener('click',()=>{state.step--;render();});
-  $('#clearStep')?.addEventListener('click',()=>{state.model=clearStepModel(state.model,steps[state.step][0]);persist();render();});
-  $('#next')?.addEventListener('click',()=>{if(state.step===0&&!state.model.topic.trim())return alert('テーマを入力してください。');if(state.step===7){state.result=buildPrompt(state.model);state.step=8;markReached();}else{state.step++;markReached();}render();});
-  document.querySelectorAll('[data-choice]').forEach(b=>b.addEventListener('click',()=>{state.model[steps[state.step][0]]=b.dataset.choice;persist();render();}));
-  document.querySelectorAll('[data-character-mode]').forEach(b=>b.addEventListener('click',()=>{state.model.characterMode=b.dataset.characterMode;state.model.characterEnabled=state.model.characterMode!=='none';persist();render();}));
-  document.querySelectorAll('[data-adapter]').forEach(b=>b.addEventListener('click',()=>{state.model.adapter=b.dataset.adapter;state.result=buildPrompt(state.model);persist();render();}));
-  ['topic','mustInclude','other','character'].forEach(id=>$('#'+id)?.addEventListener('input',e=>{state.model[id]=e.target.value;persist();}));
-  $('#copy')?.addEventListener('click',async()=>{await navigator.clipboard?.writeText(state.result);$('#status').textContent='コピーしました。ChatGPTまたはGeminiに貼り付けてください。';});
+  $('#next')?.addEventListener('click',()=>{if(state.step===0&&!state.model.topic.trim())return alert('テーマを入力してください。');if(state.step===0)analyticsFlow.start();if(state.step===7){state.result=buildPrompt(state.model);state.step=8;markReached();analyticsFlow.promptGenerated();}else{state.step++;markReached();}render();});
+  $('#clearStep')?.addEventListener('click',()=>{const before=JSON.stringify(state.model);state.model=clearStepModel(state.model,steps[state.step][0]);if(JSON.stringify(state.model)!==before)analyticsFlow.markChanged();persist();render();});
+  document.querySelectorAll('[data-choice]').forEach(b=>b.addEventListener('click',()=>{const key=steps[state.step][0];if(state.model[key]!==b.dataset.choice){state.model[key]=b.dataset.choice;analyticsFlow.markChanged();}persist();render();}));
+  document.querySelectorAll('[data-character-mode]').forEach(b=>b.addEventListener('click',()=>{if(state.model.characterMode!==b.dataset.characterMode){state.model.characterMode=b.dataset.characterMode;state.model.characterEnabled=state.model.characterMode!=='none';analyticsFlow.markChanged();}persist();render();}));
+  document.querySelectorAll('[data-adapter]').forEach(b=>b.addEventListener('click',()=>{if(state.model.adapter!==b.dataset.adapter){state.model.adapter=b.dataset.adapter;analyticsFlow.markChanged();}state.result=buildPrompt(state.model);persist();render();}));
+  ['topic','mustInclude','other','character'].forEach(id=>$('#'+id)?.addEventListener('input',e=>{if(state.model[id]!==e.target.value){state.model[id]=e.target.value;analyticsFlow.markChanged();persist();}}));
+  $('#copy')?.addEventListener('click',async()=>{const clipboard=navigator.clipboard;if(!clipboard?.writeText){$('#status').textContent='この環境ではコピーできませんでした。';return;}try{await clipboard.writeText(state.result);trackAnalyticsEvent('prompt_copied');$('#status').textContent='コピーしました。ChatGPTまたはGeminiに貼り付けてください。';}catch{$('#status').textContent='コピーできませんでした。ブラウザの設定をご確認ください。';}});
+  document.querySelectorAll('[data-analytics-consent]').forEach(button=>button.addEventListener('click',()=>{const choice=button.dataset.analyticsConsent;if(!applyAnalyticsConsent(choice)){state.analyticsMessage='設定を保存できませんでした。ブラウザの保存設定をご確認ください。';render();return;}state.analyticsConsent=choice;state.analyticsSettingsOpen=false;state.analyticsMessage='';render();}));
+  $('#analytics-settings-link')?.addEventListener('click',event=>{event.preventDefault();state.analyticsSettingsOpen=true;state.analyticsMessage='';render();document.querySelector('#analytics-settings')?.scrollIntoView({block:'nearest'});});
+  $('#closeAnalyticsSettings')?.addEventListener('click',()=>{state.analyticsSettingsOpen=false;render();});
   $('#saveProject')?.addEventListener('click',()=>{const x={id:crypto.randomUUID(),createdAt:new Date().toISOString(),topic:state.model.topic,prompt:state.result};state.history.unshift(x);state.projects.unshift({...x,model:snapshotProjectModel(state.model)});persist();render();});
-  document.querySelectorAll('[data-restore-index]').forEach(button=>button.addEventListener('click',()=>{const item=state.history[Number(button.dataset.restoreIndex)];if(!item)return;state.model=restoreProjectModel(item,state.projects);state.step=0;state.maxStep=8;state.result=buildPrompt(state.model);persist();render();}));
+  document.querySelectorAll('[data-restore-index]').forEach(button=>button.addEventListener('click',()=>{const item=state.history[Number(button.dataset.restoreIndex)];if(!item)return;const before=JSON.stringify(state.model);state.model=restoreProjectModel(item,state.projects);if(JSON.stringify(state.model)!==before)analyticsFlow.markChanged();state.step=0;state.maxStep=8;state.result=buildPrompt(state.model);persist();render();}));
   $('#export')?.addEventListener('click',()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(exportData(),null,2)],{type:'application/json'}));a.download='one-page-prompt-maker-backup.json';a.click();});
-  $('#import')?.addEventListener('change',async e=>{try{importData(JSON.parse(await e.target.files[0].text()));Object.assign(state,load());state.model=createPromptModel(state.draft||{});alert('復元しました。');render();}catch(err){alert(err.message);}});
+  $('#import')?.addEventListener('change',async e=>{try{const before=JSON.stringify(state.model);importData(JSON.parse(await e.target.files[0].text()));Object.assign(state,load());state.model=createPromptModel(state.draft||{});if(JSON.stringify(state.model)!==before)analyticsFlow.markChanged();alert('復元しました。');render();}catch(err){alert(err.message);}});
 }
-Object.assign(state,load());state.model=createPromptModel(state.draft||{});state.maxStep=Math.min(Number(state.maxStep)||0,8);render();
+Object.assign(state,load());state.model=createPromptModel(state.draft||{});state.maxStep=Math.min(Number(state.maxStep)||0,8);if(state.analyticsConsent==='granted')initializeAnalytics();render();
